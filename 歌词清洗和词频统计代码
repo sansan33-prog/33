@@ -1,0 +1,109 @@
+import pandas as pd
+import re
+import jieba
+import os
+from collections import Counter
+from openpyxl import Workbook
+from excel_api import Workbook as ExcelApiWorkbook, General
+
+# 定义停用词
+stopwords = {'的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这', '让', '更', '我们', '让', '这', '那', '吧', '而', '又', '还', '但', '他', '她', '它', '们', '啊', '呀', '呢', '哦', '嗯', '啦', '哈', '哪', '咩', '唏', '呦', '哒', '呢', '么', '嘛', '呗', '兮'}
+
+# 清洗歌词的函数
+def clean_lyrics(text):
+    # 去除时间戳 [00:00.00] 格式
+    text = re.sub(r'\[\d+:\d+\.\d+\]', '', text)
+    # 去除空格和换行
+    text = text.replace('\n', ' ').strip()
+    # 保留中文字符
+    text = ''.join([char for char in text if '\u4e00' <= char <= '\u9fff' or char.isspace()])
+    return text
+
+# 读取Excel文件并进行词频分析的函数
+def analyze_lyrics_frequency(file_path, output_excel):
+    # 创建一个新的Excel工作簿
+    wb = Workbook()
+    
+    # 读取Excel文件中的所有工作表
+    xl = pd.ExcelFile(file_path)
+    sheet_names = xl.sheet_names
+    
+    print(f"读取 {os.path.basename(file_path)} 的工作表：{sheet_names}")
+    
+    for sheet_name in sheet_names:
+        # 如果是第一个工作表，使用默认工作表
+        if sheet_names.index(sheet_name) == 0:
+            ws = wb.active
+            ws.title = sheet_name
+        else:
+            # 否则创建新工作表
+            ws = wb.create_sheet(title=sheet_name)
+        
+        # 读取工作表数据
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
+        print(f"处理 {sheet_name} 工作表，共 {len(df)} 行数据")
+        
+        # 提取歌词文本
+        all_lyrics = []
+        for _, row in df.iterrows():
+            # 获取单元格内容
+            cell_content = str(row.iloc[0])
+            # 洗歌词文本，去除时间戳和歌曲信息
+            cleaned_lyrics = clean_lyrics(cell_content)
+            if cleaned_lyrics:
+                all_lyrics.append(cleaned_lyrics)
+        
+        # 合并所有歌词
+        combined_lyrics = ' '.join(all_lyrics)
+        
+        # 使用 jieba 进行分词
+        words_list = jieba.lcut(combined_lyrics)
+        
+        # 过滤停用词和单字符
+        filtered_words = [word for word in words_list if word not in stopwords and len(word) > 1]
+        
+        # 统计词频
+        word_counts = Counter(filtered_words)
+        
+        # 获取前100个高频词
+        top_words = word_counts.most_common(100)
+        
+        # 设置表头
+        ws['A1'] = '词汇'
+        ws['B1'] = '出现频次'
+        ws['C1'] = '频率(%)'
+        
+        # 计算总词数
+        total_words = sum(count for _, count in word_counts.items())
+        
+        # 填充数据
+        for i, (word, count) in enumerate(top_words, 2):
+            ws[f'A{i}'] = word
+            ws[f'B{i}'] = count
+            ws[f'C{i}'] = (count / total_words) * 100
+        
+    # 保存工作簿
+    wb.save(output_excel)
+    print(f"已保存词频分析结果到 {output_excel}")
+    return output_excel
+
+# 主函数
+if __name__ == "__main__":
+    # 文件路径
+    file_paths = [
+        '/app/data/files/男女歌手歌曲分离结果（两个表格）.xlsx',
+        '/app/data/files/男女歌手歌曲分离结果（清洗后）.xlsx'
+    ]
+    
+    # 输出文件路径
+    output_paths = [
+        '/app/data/files/歌曲歌词词频分析结果（原始数据）.xlsx',
+        '/app/data/files/歌曲歌词词频分析结果（清洗后数据）.xlsx'
+    ]
+    
+    # 为每个输入文件生成词频分析结果
+    for file_path, output_path in zip(file_paths, output_paths):
+        print(f"\n开始分析 {os.path.basename(file_path)} 文件...")
+        analyze_lyrics_frequency(file_path, output_path)
+    
+    print("\n重新生成词频分析完成！")
